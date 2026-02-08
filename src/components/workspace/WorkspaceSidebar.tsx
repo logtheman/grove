@@ -16,6 +16,7 @@ interface WorkspaceSidebarProps {
   onSelectWorkspace: (id: string) => void;
   onDiscoverWorkspaces: (path: string) => void;
   onRemoveWorkspace: (id: string) => void;
+  onScanForWorkspaces: () => void;
 }
 
 export function WorkspaceSidebar({
@@ -25,6 +26,7 @@ export function WorkspaceSidebar({
   onSelectWorkspace,
   onDiscoverWorkspaces,
   onRemoveWorkspace,
+  onScanForWorkspaces,
 }: WorkspaceSidebarProps) {
   const [showAddInput, setShowAddInput] = useState(false);
   const [inputValue, setInputValue] = useState("");
@@ -46,13 +48,22 @@ export function WorkspaceSidebar({
         <span className="text-xs font-medium text-grove-text-muted uppercase tracking-wider">
           Workspaces
         </span>
-        <button
-          className="p-1 hover:bg-grove-surface rounded text-grove-text-muted hover:text-grove-text"
-          onClick={() => setShowAddInput(!showAddInput)}
-          title="Add workspace"
-        >
-          {showAddInput ? <Search size={12} /> : <Plus size={14} />}
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            className="p-1 hover:bg-grove-surface rounded text-grove-text-muted hover:text-grove-text"
+            onClick={onScanForWorkspaces}
+            title="Scan for workspaces in ~/projects, ~/dev, etc."
+          >
+            <Search size={12} />
+          </button>
+          <button
+            className="p-1 hover:bg-grove-surface rounded text-grove-text-muted hover:text-grove-text"
+            onClick={() => setShowAddInput(!showAddInput)}
+            title="Add workspace by path"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Add workspace input */}

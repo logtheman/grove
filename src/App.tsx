@@ -18,6 +18,7 @@ function App() {
     setActiveWorkspace,
     discoverWorkspaces,
     removeWorkspace,
+    scanForWorkspaces,
   } = useWorkspaces();
 
   const { sessions: claudeSessions, activeSessions } = useClaudeSessions();
@@ -133,6 +134,7 @@ function App() {
         onSelectWorkspace={handleSelectWorkspace}
         onDiscoverWorkspaces={handleDiscoverWorkspaces}
         onRemoveWorkspace={removeWorkspace}
+        onScanForWorkspaces={scanForWorkspaces}
       />
 
       {/* Center: Terminal area */}

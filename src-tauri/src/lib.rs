@@ -29,6 +29,7 @@ pub fn run() {
             ipc::commands::discover_workspaces,
             ipc::commands::remove_workspace,
             ipc::commands::list_workspaces,
+            ipc::commands::scan_for_workspaces,
             // Git
             ipc::commands::get_git_status,
             ipc::commands::start_git_watching,

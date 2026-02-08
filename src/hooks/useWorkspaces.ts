@@ -84,6 +84,14 @@ export function useWorkspaces() {
     [removeWorkspaceFromStore],
   );
 
+  const handleScanForWorkspaces = useCallback(async () => {
+    const { scanForWorkspaces } = await import("@/services/tauri");
+    const discovered = await scanForWorkspaces();
+    addWorkspaces(discovered);
+    console.log("[useWorkspaces] Scanned and found", discovered.length, "workspaces");
+    return discovered;
+  }, [addWorkspaces]);
+
   return {
     workspaces,
     activeWorkspaceId,
@@ -92,5 +100,6 @@ export function useWorkspaces() {
     addWorkspace: handleAddWorkspace,
     discoverWorkspaces: handleDiscoverWorkspaces,
     removeWorkspace: handleRemoveWorkspace,
+    scanForWorkspaces: handleScanForWorkspaces,
   };
 }

@@ -207,6 +207,30 @@ pub fn list_workspaces(state: tauri::State<'_, Arc<AppState>>) -> Vec<Workspace>
 }
 
 #[tauri::command]
+pub fn scan_for_workspaces(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<Workspace>, String> {
+    use crate::workspace::discovery;
+
+    let discovered = discovery::discover_common_repos();
+
+    let mut workspaces = state.workspaces.lock();
+    let added = workspaces.add_multiple_from_discovery(discovered);
+
+    // Persist
+    let _ = ws_state::save_workspaces(&workspaces.list_workspaces());
+
+    // Restart watchers with new paths
+    restart_git_watcher(&app, &state, &workspaces);
+    restart_claude_monitor(&app, &state, &workspaces);
+
+    eprintln!("[grove-cmd] scan_for_workspaces: discovered {} workspaces", added.len());
+
+    Ok(added)
+}
+
+#[tauri::command]
 pub fn get_git_status(
     state: tauri::State<'_, Arc<AppState>>,
     workspace_id: String,

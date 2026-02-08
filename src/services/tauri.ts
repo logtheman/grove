@@ -84,6 +84,10 @@ export async function listWorkspaces(): Promise<Workspace[]> {
   return invoke<Workspace[]>("list_workspaces");
 }
 
+export async function scanForWorkspaces(): Promise<Workspace[]> {
+  return invoke<Workspace[]>("scan_for_workspaces");
+}
+
 // ── Git ──
 
 export async function getGitStatus(workspaceId: string): Promise<GitStatus> {

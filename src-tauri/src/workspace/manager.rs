@@ -134,4 +134,32 @@ impl WorkspaceManager {
             self.workspaces.insert(ws.id.clone(), ws);
         }
     }
+
+    /// Add multiple workspaces from discovery results.
+    pub fn add_multiple_from_discovery(&mut self, worktrees: Vec<discovery::WorktreeInfo>) -> Vec<Workspace> {
+        let mut added = Vec::new();
+
+        for wt in worktrees {
+            let path_str = wt.path.to_string_lossy().to_string();
+
+            // Skip if already tracked
+            if self.workspaces.values().any(|ws| ws.path == path_str) {
+                continue;
+            }
+
+            let id = uuid::Uuid::new_v4().to_string();
+            let workspace = Workspace {
+                id: id.clone(),
+                name: wt.name,
+                path: path_str,
+                git_branch: wt.branch,
+                is_main_worktree: wt.is_main,
+            };
+
+            self.workspaces.insert(id, workspace.clone());
+            added.push(workspace);
+        }
+
+        added
+    }
 }

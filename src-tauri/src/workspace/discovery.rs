@@ -72,6 +72,52 @@ pub fn scan_directories(dirs: &[PathBuf]) -> Vec<WorktreeInfo> {
     all_worktrees
 }
 
+/// Discover git repos in common project directories
+pub fn discover_common_repos() -> Vec<WorktreeInfo> {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return Vec::new(),
+    };
+
+    let common_dirs = vec![
+        home.join("projects"),
+        home.join("dev"),
+        home.join("Development"),
+        home.join("Code"),
+        home.join("src"),
+        home.join("workspace"),
+    ];
+
+    let mut all_worktrees = Vec::new();
+    let mut seen_paths = std::collections::HashSet::new();
+
+    for parent_dir in common_dirs {
+        if !parent_dir.exists() {
+            continue;
+        }
+
+        // Scan immediate subdirectories for git repos
+        if let Ok(entries) = std::fs::read_dir(&parent_dir) {
+            for entry in entries.flatten() {
+                if let Ok(path) = entry.path().canonicalize() {
+                    // Check if it's a git repo
+                    if path.join(".git").exists() {
+                        if let Ok(worktrees) = discover_worktrees(&path) {
+                            for wt in worktrees {
+                                if seen_paths.insert(wt.path.clone()) {
+                                    all_worktrees.push(wt);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    all_worktrees
+}
+
 fn get_head_branch(repo: &git2::Repository) -> Option<String> {
     repo.head().ok().and_then(|head| {
         if head.is_branch() {
