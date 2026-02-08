@@ -1,0 +1,1 @@
+/Users/loganmurdock/projects/grove/src-tauri/target/release/bundle/macos/Grove.app

@@ -122,7 +122,7 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
           window.groveDebug.dataCount = dataCount;
           window.groveDebug.lastByteCount = bytes.length;
 
-          console.log("[grove-term] DATA RECEIVED!", dataCount, "chunks,", bytes.length, "bytes");
+          console.log("[grove-term] DATA RECEIVED!", dataCount, "chunks,", bytes.length, "bytes", "data:", data);
           console.error("[grove-term] DATA RECEIVED!", dataCount, "chunks,", bytes.length, "bytes"); // More visible
 
           // Update debug indicator if it exists
@@ -132,9 +132,17 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
             (indicator as HTMLElement).style.background = "green";
           }
 
+          console.log("[grove-term] terminalRef exists?", !!terminalRef.current, "bytes:", bytes);
           if (terminalRef.current) {
-            terminalRef.current.write(bytes);
+            console.log("[grove-term] Calling terminal.write()...");
+            try {
+              terminalRef.current.write(bytes);
+              console.log("[grove-term] terminal.write() completed successfully");
+            } catch (error) {
+              console.error("[grove-term] terminal.write() FAILED:", error);
+            }
           } else {
+            console.log("[grove-term] Buffering - terminal not ready");
             pendingDataRef.current.push(bytes);
           }
         });
@@ -145,6 +153,14 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
 
         console.log("[grove-term] listeners successfully set up for:", terminalId);
         console.error("[grove-term] LISTENERS READY!", terminalId);
+
+        // WORKAROUND: Send Ctrl+L to clear screen and redraw prompt
+        // This fixes the race condition where initial prompt was lost
+        setTimeout(() => {
+          console.log("[grove-term] Sending Ctrl+L to redraw prompt");
+          const ctrlL = new Uint8Array([12]); // ASCII 12 = Ctrl+L
+          writeToTerminal(terminalId, ctrlL);
+        }, 100);
       } catch (error) {
         console.error("[grove-term] Error setting up listeners:", error);
         alert("Failed to set up terminal listeners: " + error);
