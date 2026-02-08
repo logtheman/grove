@@ -30,6 +30,14 @@ impl PtySession {
         })?;
         eprintln!("[grove-pty] openpty succeeded");
 
+        // IMPORTANT: On macOS, reader and writer must be obtained from master
+        // BEFORE spawning the command and BEFORE dropping the slave.
+        // Otherwise the reader FD may not receive PTY output.
+        let mut reader = pair.master.try_clone_reader()?;
+        eprintln!("[grove-pty] got reader");
+        let writer = pair.master.take_writer()?;
+        eprintln!("[grove-pty] got writer");
+
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
         eprintln!("[grove-pty] using shell: {}", shell);
 
@@ -44,10 +52,7 @@ impl PtySession {
 
         // Drop slave after spawning - master keeps the PTY open
         drop(pair.slave);
-
-        let writer = pair.master.take_writer()?;
-        let mut reader = pair.master.try_clone_reader()?;
-        eprintln!("[grove-pty] got writer and reader");
+        eprintln!("[grove-pty] slave dropped");
 
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_reader = shutdown.clone();
@@ -68,6 +73,7 @@ impl PtySession {
                         break;
                     }
                     Ok(n) => {
+                        eprintln!("[grove-pty] reader thread: read {} bytes", n);
                         on_data(buf[..n].to_vec());
                     }
                     Err(e) => {
