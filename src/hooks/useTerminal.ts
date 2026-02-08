@@ -20,8 +20,12 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
   const initializedRef = useRef(false);
   // Buffer data that arrives before terminal is ready
   const pendingDataRef = useRef<Uint8Array[]>([]);
+  // Store onExit in a ref so it doesn't trigger useEffect re-runs
+  const onExitRef = useRef(onExit);
+  onExitRef.current = onExit;
 
   // Single useEffect that handles init, data listener, and cleanup together
+  // NOTE: only depends on terminalId, NOT onExit (stored in ref above)
   useEffect(() => {
     console.log("[grove-term] useEffect: container=", !!containerRef.current, "initialized=", initializedRef.current, "terminalId=", terminalId);
     if (!containerRef.current || initializedRef.current) return;
@@ -112,7 +116,7 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
       });
 
       unlistenExit = await onTerminalExit(terminalId, () => {
-        onExit?.();
+        onExitRef.current?.();
       });
     };
 
@@ -133,7 +137,7 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
       fitAddonRef.current = null;
       initializedRef.current = false;
     };
-  }, [terminalId, onExit]);
+  }, [terminalId]);
 
   const focus = useCallback(() => {
     terminalRef.current?.focus();

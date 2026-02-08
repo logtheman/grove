@@ -11,10 +11,13 @@ body,
   overflow: hidden;
 }
 
-/* xterm.js container needs explicit dimensions */
+/* xterm.js container: absolute-fill the relative parent */
 .xterm-container {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
 }
 
 .xterm-container .xterm {

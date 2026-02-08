@@ -26,7 +26,10 @@ export function TerminalTab({ terminalId, isActive, onExit }: TerminalTabProps) 
   return (
     <div
       className="xterm-container"
-      style={{ display: isActive ? "block" : "none" }}
+      style={{
+        visibility: isActive ? "visible" : "hidden",
+        zIndex: isActive ? 1 : 0,
+      }}
     >
       <div ref={containerRef} className="h-full w-full" />
     </div>
