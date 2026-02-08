@@ -31,21 +31,23 @@ export function TerminalTab({ terminalId, isActive, onExit }: TerminalTabProps) 
         zIndex: isActive ? 1 : 0,
       }}
     >
-      {/* DEBUG indicator */}
+      {/* DEBUG indicator - moved to top right corner */}
       <div
         className="debug-indicator"
         style={{
           position: "absolute",
-          top: 0,
-          left: 0,
-          background: "red",
+          top: "8px",
+          right: "8px",
+          background: "rgba(0, 0, 0, 0.7)",
           color: "white",
-          padding: "8px",
+          padding: "4px 8px",
           zIndex: 9999,
-          fontSize: "12px",
+          fontSize: "10px",
+          borderRadius: "4px",
+          pointerEvents: "none",
         }}
       >
-        Waiting for data...
+        Ready
       </div>
       <div ref={containerRef} className="h-full w-full" />
     </div>

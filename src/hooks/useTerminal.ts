@@ -204,7 +204,14 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
                   width: (canvas as HTMLCanvasElement).width,
                   height: (canvas as HTMLCanvasElement).height,
                 } : { exists: false },
-                fullStructure: termContainer?.innerHTML.slice(0, 3000),
+                fullStructure: termContainer?.innerHTML.slice(0, 5000),
+                rowsParent: rows?.parentElement?.className,
+                rowsNextSibling: rows?.nextSibling?.nodeName,
+                screenChildren: Array.from(screen?.children || []).map((el: any) => ({
+                  tag: el.tagName,
+                  className: el.className,
+                  id: el.id,
+                })),
               },
             };
 
