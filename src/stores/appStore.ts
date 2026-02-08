@@ -13,7 +13,7 @@ interface AppStore {
   updateTabTitle: (id: string, title: string) => void;
 }
 
-export const useAppStore = create<AppStore>((set, get) => ({
+export const useAppStore = create<AppStore>((set) => ({
   tabs: [],
   activeTabId: null,
 
