@@ -1,7 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { WebglAddon } from "@xterm/addon-webgl";
 import {
   writeToTerminal,
   resizeTerminal,
@@ -18,9 +17,14 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const initializedRef = useRef(false);
+  // Buffer data that arrives before terminal is ready
+  const pendingDataRef = useRef<Uint8Array[]>([]);
 
-  const initTerminal = useCallback(() => {
-    if (!containerRef.current || terminalRef.current) return;
+  // Single useEffect that handles init, data listener, and cleanup together
+  useEffect(() => {
+    if (!containerRef.current || initializedRef.current) return;
+    initializedRef.current = true;
 
     const terminal = new Terminal({
       cursorBlink: true,
@@ -57,14 +61,7 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
 
     terminal.open(containerRef.current);
 
-    // Try WebGL, fall back to canvas
-    try {
-      const webglAddon = new WebglAddon();
-      terminal.loadAddon(webglAddon);
-    } catch {
-      console.warn("WebGL addon failed to load, using canvas renderer");
-    }
-
+    // Skip WebGL - canvas renderer is more reliable cross-platform
     fitAddon.fit();
 
     // Send input to PTY
@@ -81,19 +78,29 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
+    // Flush any buffered data
+    for (const chunk of pendingDataRef.current) {
+      terminal.write(chunk);
+    }
+    pendingDataRef.current = [];
+
     // Send initial size to backend
     resizeTerminal(terminalId, terminal.rows, terminal.cols);
-  }, [terminalId]);
 
-  // Set up data listener
-  useEffect(() => {
+    // Focus the terminal
+    terminal.focus();
+
+    // Set up data listener
     let unlistenData: (() => void) | undefined;
     let unlistenExit: (() => void) | undefined;
 
-    const setup = async () => {
+    const setupListeners = async () => {
       unlistenData = await onTerminalData(terminalId, (data) => {
+        const bytes = new Uint8Array(data);
         if (terminalRef.current) {
-          terminalRef.current.write(new Uint8Array(data));
+          terminalRef.current.write(bytes);
+        } else {
+          pendingDataRef.current.push(bytes);
         }
       });
 
@@ -102,32 +109,24 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
       });
     };
 
-    setup();
+    setupListeners();
 
-    return () => {
-      unlistenData?.();
-      unlistenExit?.();
-    };
-  }, [terminalId, onExit]);
-
-  // Handle window resize
-  useEffect(() => {
+    // Window resize handler
     const handleResize = () => {
       fitAddonRef.current?.fit();
     };
-
     window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
 
-  // Cleanup
-  useEffect(() => {
     return () => {
-      terminalRef.current?.dispose();
+      window.removeEventListener("resize", handleResize);
+      unlistenData?.();
+      unlistenExit?.();
+      terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
+      initializedRef.current = false;
     };
-  }, []);
+  }, [terminalId, onExit]);
 
   const focus = useCallback(() => {
     terminalRef.current?.focus();
@@ -139,7 +138,6 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
 
   return {
     containerRef,
-    initTerminal,
     focus,
     fit,
   };

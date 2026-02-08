@@ -9,18 +9,13 @@ interface TerminalTabProps {
 }
 
 export function TerminalTab({ terminalId, isActive, onExit }: TerminalTabProps) {
-  const { containerRef, initTerminal, focus, fit } = useTerminal({
+  const { containerRef, focus, fit } = useTerminal({
     terminalId,
     onExit,
   });
 
   useEffect(() => {
-    initTerminal();
-  }, [initTerminal]);
-
-  useEffect(() => {
     if (isActive) {
-      // Small delay to ensure DOM is updated
       requestAnimationFrame(() => {
         fit();
         focus();
