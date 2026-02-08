@@ -23,8 +23,10 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
 
   // Single useEffect that handles init, data listener, and cleanup together
   useEffect(() => {
+    console.log("[grove-term] useEffect: container=", !!containerRef.current, "initialized=", initializedRef.current, "terminalId=", terminalId);
     if (!containerRef.current || initializedRef.current) return;
     initializedRef.current = true;
+    console.log("[grove-term] initializing terminal:", terminalId);
 
     const terminal = new Terminal({
       cursorBlink: true,
@@ -60,12 +62,15 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
     terminal.loadAddon(fitAddon);
 
     terminal.open(containerRef.current);
+    console.log("[grove-term] xterm opened in DOM");
 
     // Skip WebGL - canvas renderer is more reliable cross-platform
     fitAddon.fit();
+    console.log("[grove-term] fitAddon.fit() done, rows=", terminal.rows, "cols=", terminal.cols);
 
     // Send input to PTY
     terminal.onData((data) => {
+      console.log("[grove-term] onData from xterm:", JSON.stringify(data));
       const encoded = new TextEncoder().encode(data);
       writeToTerminal(terminalId, encoded);
     });
@@ -95,8 +100,10 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
     let unlistenExit: (() => void) | undefined;
 
     const setupListeners = async () => {
+      console.log("[grove-term] setting up listeners for:", terminalId);
       unlistenData = await onTerminalData(terminalId, (data) => {
         const bytes = new Uint8Array(data);
+        console.log("[grove-term] writing", bytes.length, "bytes to xterm, terminalRef=", !!terminalRef.current);
         if (terminalRef.current) {
           terminalRef.current.write(bytes);
         } else {

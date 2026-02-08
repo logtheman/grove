@@ -1,12 +1,13 @@
 use anyhow::Result;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
-use tokio::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
-    shutdown_tx: mpsc::Sender<()>,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl PtySession {
@@ -15,7 +16,10 @@ impl PtySession {
         rows: u16,
         cols: u16,
         on_data: impl Fn(Vec<u8>) + Send + 'static,
+        on_exit: impl Fn() + Send + 'static,
     ) -> Result<Self> {
+        eprintln!("[grove-pty] spawn: cwd={}, rows={}, cols={}", cwd, rows, cols);
+
         let pty_system = native_pty_system();
 
         let pair = pty_system.openpty(PtySize {
@@ -24,50 +28,77 @@ impl PtySession {
             pixel_width: 0,
             pixel_height: 0,
         })?;
+        eprintln!("[grove-pty] openpty succeeded");
 
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-        let mut cmd = CommandBuilder::new(&shell);
-        cmd.cwd(cwd);
+        eprintln!("[grove-pty] using shell: {}", shell);
 
-        // Set TERM for proper terminal emulation
+        let mut cmd = CommandBuilder::new(&shell);
+        // Login shell flag to source profile on macOS
+        cmd.arg("-l");
+        cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
 
-        pair.slave.spawn_command(cmd)?;
-        // Drop slave after spawning - not needed anymore
+        let mut child = pair.slave.spawn_command(cmd)?;
+        eprintln!("[grove-pty] spawn_command succeeded");
+
+        // Drop slave after spawning - master keeps the PTY open
         drop(pair.slave);
 
         let writer = pair.master.take_writer()?;
         let mut reader = pair.master.try_clone_reader()?;
+        eprintln!("[grove-pty] got writer and reader");
 
-        let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_reader = shutdown.clone();
 
-        // Spawn reader thread
+        // Spawn reader thread - reads PTY output and sends to frontend
         std::thread::spawn(move || {
+            eprintln!("[grove-pty] reader thread started");
             let mut buf = [0u8; 4096];
             loop {
-                // Check for shutdown
-                if shutdown_rx.try_recv().is_ok() {
+                if shutdown_reader.load(Ordering::Relaxed) {
+                    eprintln!("[grove-pty] reader thread: shutdown requested");
                     break;
                 }
 
                 match reader.read(&mut buf) {
-                    Ok(0) => break, // EOF
+                    Ok(0) => {
+                        eprintln!("[grove-pty] reader thread: EOF");
+                        break;
+                    }
                     Ok(n) => {
                         on_data(buf[..n].to_vec());
                     }
                     Err(e) => {
+                        eprintln!("[grove-pty] reader thread: error: {} (kind={:?})", e, e.kind());
                         if e.kind() != std::io::ErrorKind::WouldBlock {
                             break;
                         }
                     }
                 }
             }
+            eprintln!("[grove-pty] reader thread exiting");
+        });
+
+        // Spawn child-wait thread - detects when shell process exits
+        std::thread::spawn(move || {
+            eprintln!("[grove-pty] child-wait thread started");
+            match child.wait() {
+                Ok(status) => {
+                    eprintln!("[grove-pty] child exited: {:?}", status);
+                }
+                Err(e) => {
+                    eprintln!("[grove-pty] child wait error: {}", e);
+                }
+            }
+            on_exit();
         });
 
         Ok(Self {
             master: pair.master,
             writer,
-            shutdown_tx,
+            shutdown,
         })
     }
 
@@ -88,7 +119,7 @@ impl PtySession {
     }
 
     pub fn shutdown(&self) {
-        let _ = self.shutdown_tx.try_send(());
+        self.shutdown.store(true, Ordering::Relaxed);
     }
 }
 

@@ -32,13 +32,31 @@ pub fn create_terminal(
             .unwrap_or_else(|| "/".to_string())
     });
 
-    let event_id = terminal_id.clone();
-    let app_handle = app.clone();
+    eprintln!("[grove-cmd] create_terminal: id={}, cwd={}", terminal_id, working_dir);
 
-    let session = PtySession::spawn(&working_dir, 24, 80, move |data| {
-        let event_name = format!("{}:{}", events::TERMINAL_DATA, event_id);
-        let _ = app_handle.emit(&event_name, data);
-    })
+    let data_event_id = terminal_id.clone();
+    let data_app_handle = app.clone();
+
+    let exit_event_id = terminal_id.clone();
+    let exit_app_handle = app.clone();
+
+    let session = PtySession::spawn(
+        &working_dir,
+        24,
+        80,
+        move |data| {
+            let event_name = format!("{}:{}", events::TERMINAL_DATA, data_event_id);
+            let result = data_app_handle.emit(&event_name, &data);
+            if let Err(e) = result {
+                eprintln!("[grove-cmd] emit data error: {}", e);
+            }
+        },
+        move || {
+            eprintln!("[grove-cmd] terminal exited: {}", exit_event_id);
+            let event_name = format!("{}:{}", events::TERMINAL_EXIT, exit_event_id);
+            let _ = exit_app_handle.emit(&event_name, ());
+        },
+    )
     .map_err(|e| format!("Failed to create terminal: {}", e))?;
 
     let info = TerminalInfo {
@@ -46,7 +64,8 @@ pub fn create_terminal(
         cwd: working_dir,
     };
 
-    state.terminals.lock().insert(terminal_id, session);
+    state.terminals.lock().insert(terminal_id.clone(), session);
+    eprintln!("[grove-cmd] terminal created successfully: {}", terminal_id);
 
     Ok(info)
 }
@@ -75,8 +94,12 @@ pub fn write_to_terminal(
     if let Some(session) = terminals.get_mut(&terminal_id) {
         session
             .write(&data)
-            .map_err(|e| format!("Write failed: {}", e))
+            .map_err(|e| {
+                eprintln!("[grove-cmd] write_to_terminal error: {}", e);
+                format!("Write failed: {}", e)
+            })
     } else {
+        eprintln!("[grove-cmd] write_to_terminal: terminal {} not found", terminal_id);
         Err(format!("Terminal {} not found", terminal_id))
     }
 }

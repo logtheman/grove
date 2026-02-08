@@ -5,7 +5,10 @@ import type { TerminalInfo, Workspace, GitStatus, ClaudeSession } from "@/types"
 // ── Terminal ──
 
 export async function createTerminal(cwd?: string): Promise<TerminalInfo> {
-  return invoke<TerminalInfo>("create_terminal", { cwd });
+  console.log("[grove-ts] createTerminal: cwd=", cwd);
+  const info = await invoke<TerminalInfo>("create_terminal", { cwd });
+  console.log("[grove-ts] createTerminal result:", info);
+  return info;
 }
 
 export async function closeTerminal(terminalId: string): Promise<void> {
@@ -16,6 +19,7 @@ export async function writeToTerminal(
   terminalId: string,
   data: Uint8Array,
 ): Promise<void> {
+  console.log("[grove-ts] writeToTerminal:", terminalId, "bytes:", data.length);
   return invoke("write_to_terminal", {
     terminalId,
     data: Array.from(data),
@@ -38,7 +42,9 @@ export function onTerminalData(
   terminalId: string,
   callback: (data: number[]) => void,
 ): Promise<UnlistenFn> {
+  console.log("[grove-ts] subscribing to terminal-data:", terminalId);
   return listen<number[]>(`terminal-data:${terminalId}`, (event) => {
+    console.log("[grove-ts] terminal-data received:", terminalId, "bytes:", event.payload.length);
     callback(event.payload);
   });
 }
