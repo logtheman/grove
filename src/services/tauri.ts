@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { TerminalInfo } from "@/types";
+import type { TerminalInfo, Workspace, GitStatus } from "@/types";
+
+// ── Terminal ──
 
 export async function createTerminal(cwd?: string): Promise<TerminalInfo> {
   return invoke<TerminalInfo>("create_terminal", { cwd });
@@ -48,4 +50,46 @@ export function onTerminalExit(
   return listen(`terminal-exit:${terminalId}`, () => {
     callback();
   });
+}
+
+// ── Workspace ──
+
+export async function addWorkspace(path: string): Promise<Workspace> {
+  return invoke<Workspace>("add_workspace", { path });
+}
+
+export async function discoverWorkspaces(
+  repoPath: string,
+): Promise<Workspace[]> {
+  return invoke<Workspace[]>("discover_workspaces", { repoPath });
+}
+
+export async function removeWorkspace(workspaceId: string): Promise<void> {
+  return invoke("remove_workspace", { workspaceId });
+}
+
+export async function listWorkspaces(): Promise<Workspace[]> {
+  return invoke<Workspace[]>("list_workspaces");
+}
+
+// ── Git ──
+
+export async function getGitStatus(workspaceId: string): Promise<GitStatus> {
+  return invoke<GitStatus>("get_git_status", { workspaceId });
+}
+
+export async function startGitWatching(): Promise<void> {
+  return invoke("start_git_watching");
+}
+
+export function onGitStatusUpdated(
+  workspaceId: string,
+  callback: (status: GitStatus) => void,
+): Promise<UnlistenFn> {
+  return listen<GitStatus>(
+    `git-status-updated:${workspaceId}`,
+    (event) => {
+      callback(event.payload);
+    },
+  );
 }

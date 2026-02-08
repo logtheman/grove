@@ -9,12 +9,12 @@ export interface TerminalTab {
   title: string;
 }
 
-export interface WorkspaceInfo {
+export interface Workspace {
   id: string;
   name: string;
   path: string;
-  gitBranch?: string;
-  dirty: boolean;
+  gitBranch: string | null;
+  isMainWorktree: boolean;
 }
 
 export interface GitStatus {

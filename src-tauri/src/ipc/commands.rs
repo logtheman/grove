@@ -1,9 +1,16 @@
+use crate::git::status as git_status;
+use crate::git::watcher;
 use crate::ipc::events;
 use crate::pty::manager::PtySession;
 use crate::state::AppState;
+use crate::workspace::manager::Workspace;
+use crate::workspace::state as ws_state;
 use serde::Serialize;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
+
+// ── Terminal commands ──
 
 #[derive(Serialize)]
 pub struct TerminalInfo {
@@ -93,4 +100,116 @@ pub fn resize_terminal(
 #[tauri::command]
 pub fn list_terminals(state: tauri::State<'_, Arc<AppState>>) -> Vec<String> {
     state.terminals.lock().keys().cloned().collect()
+}
+
+// ── Workspace commands ──
+
+#[tauri::command]
+pub fn add_workspace(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    path: String,
+) -> Result<Workspace, String> {
+    let mut workspaces = state.workspaces.lock();
+    let ws = workspaces
+        .add_workspace(&path)
+        .map_err(|e| format!("Failed to add workspace: {}", e))?;
+
+    // Persist
+    let _ = ws_state::save_workspaces(&workspaces.list_workspaces());
+
+    // Start git watching for the new workspace
+    restart_git_watcher(&app, &state, &workspaces);
+
+    Ok(ws)
+}
+
+#[tauri::command]
+pub fn discover_workspaces(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    repo_path: String,
+) -> Result<Vec<Workspace>, String> {
+    let mut workspaces = state.workspaces.lock();
+    let added = workspaces
+        .add_from_discovery(&repo_path)
+        .map_err(|e| format!("Discovery failed: {}", e))?;
+
+    // Persist
+    let _ = ws_state::save_workspaces(&workspaces.list_workspaces());
+
+    // Restart git watcher with new paths
+    restart_git_watcher(&app, &state, &workspaces);
+
+    Ok(added)
+}
+
+#[tauri::command]
+pub fn remove_workspace(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    workspace_id: String,
+) -> Result<(), String> {
+    let mut workspaces = state.workspaces.lock();
+    workspaces
+        .remove_workspace(&workspace_id)
+        .ok_or_else(|| format!("Workspace {} not found", workspace_id))?;
+
+    let _ = ws_state::save_workspaces(&workspaces.list_workspaces());
+
+    restart_git_watcher(&app, &state, &workspaces);
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_workspaces(state: tauri::State<'_, Arc<AppState>>) -> Vec<Workspace> {
+    state.workspaces.lock().list_workspaces()
+}
+
+#[tauri::command]
+pub fn get_git_status(
+    state: tauri::State<'_, Arc<AppState>>,
+    workspace_id: String,
+) -> Result<git_status::GitStatus, String> {
+    let workspaces = state.workspaces.lock();
+    let ws = workspaces
+        .get_workspace(&workspace_id)
+        .ok_or_else(|| format!("Workspace {} not found", workspace_id))?;
+
+    git_status::query_status(&workspace_id, &PathBuf::from(&ws.path))
+        .map_err(|e| format!("Git status failed: {}", e))
+}
+
+#[tauri::command]
+pub fn start_git_watching(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let workspaces = state.workspaces.lock();
+    restart_git_watcher(&app, &state, &workspaces);
+    Ok(())
+}
+
+// ── Helpers ──
+
+fn restart_git_watcher(
+    app: &AppHandle,
+    state: &tauri::State<'_, Arc<AppState>>,
+    workspaces: &crate::workspace::manager::WorkspaceManager,
+) {
+    let mut watcher_slot = state.git_watcher.lock();
+
+    // Stop existing watcher
+    if let Some(old_watcher) = watcher_slot.take() {
+        old_watcher.stop();
+    }
+
+    // Start new watcher with current workspace paths
+    let paths = workspaces.workspace_paths();
+    if !paths.is_empty() {
+        if let Ok(handle) = watcher::start_watching(app.clone(), paths) {
+            *watcher_slot = Some(handle);
+        }
+    }
 }
