@@ -1,3 +1,4 @@
+use crate::claude::monitor as claude_monitor;
 use crate::git::status as git_status;
 use crate::git::watcher;
 use crate::ipc::events;
@@ -118,8 +119,9 @@ pub fn add_workspace(
     // Persist
     let _ = ws_state::save_workspaces(&workspaces.list_workspaces());
 
-    // Start git watching for the new workspace
+    // Start watchers for the new workspace
     restart_git_watcher(&app, &state, &workspaces);
+    restart_claude_monitor(&app, &state, &workspaces);
 
     Ok(ws)
 }
@@ -138,8 +140,9 @@ pub fn discover_workspaces(
     // Persist
     let _ = ws_state::save_workspaces(&workspaces.list_workspaces());
 
-    // Restart git watcher with new paths
+    // Restart watchers with new paths
     restart_git_watcher(&app, &state, &workspaces);
+    restart_claude_monitor(&app, &state, &workspaces);
 
     Ok(added)
 }
@@ -158,6 +161,7 @@ pub fn remove_workspace(
     let _ = ws_state::save_workspaces(&workspaces.list_workspaces());
 
     restart_git_watcher(&app, &state, &workspaces);
+    restart_claude_monitor(&app, &state, &workspaces);
 
     Ok(())
 }
@@ -191,7 +195,36 @@ pub fn start_git_watching(
     Ok(())
 }
 
+// ── Claude Code commands ──
+
+#[tauri::command]
+pub fn start_claude_monitoring(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let workspaces = state.workspaces.lock();
+    restart_claude_monitor(&app, &state, &workspaces);
+    Ok(())
+}
+
 // ── Helpers ──
+
+fn restart_claude_monitor(
+    app: &AppHandle,
+    state: &tauri::State<'_, Arc<AppState>>,
+    workspaces: &crate::workspace::manager::WorkspaceManager,
+) {
+    let mut monitor_slot = state.claude_monitor.lock();
+
+    if let Some(old_monitor) = monitor_slot.take() {
+        old_monitor.stop();
+    }
+
+    let paths = workspaces.workspace_paths();
+    if let Ok(handle) = claude_monitor::start_monitoring(app.clone(), paths) {
+        *monitor_slot = Some(handle);
+    }
+}
 
 fn restart_git_watcher(
     app: &AppHandle,

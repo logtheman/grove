@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { TerminalInfo, Workspace, GitStatus } from "@/types";
+import type { TerminalInfo, Workspace, GitStatus, ClaudeSession } from "@/types";
 
 // ── Terminal ──
 
@@ -92,4 +92,18 @@ export function onGitStatusUpdated(
       callback(event.payload);
     },
   );
+}
+
+// ── Claude Code ──
+
+export async function startClaudeMonitoring(): Promise<void> {
+  return invoke("start_claude_monitoring");
+}
+
+export function onClaudeSessionsUpdated(
+  callback: (sessions: ClaudeSession[]) => void,
+): Promise<UnlistenFn> {
+  return listen<ClaudeSession[]>("claude-sessions-updated", (event) => {
+    callback(event.payload);
+  });
 }

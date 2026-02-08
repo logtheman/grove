@@ -1,3 +1,4 @@
+use crate::claude::monitor::ClaudeMonitorHandle;
 use crate::git::watcher::GitWatcherHandle;
 use crate::pty::manager::PtySession;
 use crate::workspace::manager::WorkspaceManager;
@@ -8,6 +9,7 @@ pub struct AppState {
     pub terminals: Mutex<HashMap<String, PtySession>>,
     pub workspaces: Mutex<WorkspaceManager>,
     pub git_watcher: Mutex<Option<GitWatcherHandle>>,
+    pub claude_monitor: Mutex<Option<ClaudeMonitorHandle>>,
 }
 
 impl AppState {
@@ -22,6 +24,7 @@ impl AppState {
             terminals: Mutex::new(HashMap::new()),
             workspaces: Mutex::new(wm),
             git_watcher: Mutex::new(None),
+            claude_monitor: Mutex::new(None),
         }
     }
 }

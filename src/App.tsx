@@ -2,9 +2,11 @@ import { useCallback, useEffect } from "react";
 import { useAppStore } from "@/stores/appStore";
 import { createTerminal, closeTerminal } from "@/services/tauri";
 import { useWorkspaces } from "@/hooks/useWorkspaces";
+import { useClaudeSessions } from "@/hooks/useClaudeSessions";
 import { TerminalTab } from "@/components/terminal/TerminalTab";
 import { TerminalTabBar } from "@/components/terminal/TerminalTabBar";
 import { WorkspaceSidebar } from "@/components/workspace/WorkspaceSidebar";
+import { DashboardPanel } from "@/components/dashboard/DashboardPanel";
 
 function App() {
   const { tabs, activeTabId, addTab, removeTab, setActiveTab } = useAppStore();
@@ -18,7 +20,12 @@ function App() {
     removeWorkspace,
   } = useWorkspaces();
 
+  const { sessions: claudeSessions, activeSessions } = useClaudeSessions();
+
   const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
+  const activeGitStatus = activeWorkspaceId
+    ? gitStatuses[activeWorkspaceId]
+    : undefined;
 
   const handleNewTab = useCallback(async () => {
     try {
@@ -113,12 +120,12 @@ function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [tabs, activeTabId, handleNewTab, handleCloseTab, setActiveTab]);
 
-  // Count dirty workspaces for status bar
+  // Counts for status bar
   const dirtyCount = Object.values(gitStatuses).filter((s) => s.dirty).length;
 
   return (
     <div className="flex h-screen bg-grove-bg">
-      {/* Sidebar */}
+      {/* Left: Workspace sidebar */}
       <WorkspaceSidebar
         workspaces={workspaces}
         activeWorkspaceId={activeWorkspaceId}
@@ -128,9 +135,8 @@ function App() {
         onRemoveWorkspace={removeWorkspace}
       />
 
-      {/* Main area */}
+      {/* Center: Terminal area */}
       <div className="flex flex-col flex-1 min-w-0">
-        {/* Tab bar */}
         <TerminalTabBar
           tabs={tabs}
           activeTabId={activeTabId}
@@ -139,7 +145,6 @@ function App() {
           onNewTab={handleNewTab}
         />
 
-        {/* Terminal area */}
         <div className="flex-1 relative overflow-hidden">
           {tabs.length === 0 && (
             <div className="flex items-center justify-center h-full text-grove-text-muted">
@@ -181,9 +186,23 @@ function App() {
               <span className="text-grove-warning">{dirtyCount} dirty</span>
             </>
           )}
+          {activeSessions.length > 0 && (
+            <>
+              <span className="mx-2">|</span>
+              <span className="text-grove-accent">
+                {activeSessions.length} Claude
+              </span>
+            </>
+          )}
           <span className="ml-auto">Grove v0.1.0</span>
         </div>
       </div>
+
+      {/* Right: Dashboard panel */}
+      <DashboardPanel
+        gitStatus={activeGitStatus}
+        claudeSessions={claudeSessions}
+      />
     </div>
   );
 }

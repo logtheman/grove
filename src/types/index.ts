@@ -36,10 +36,21 @@ export interface ProcessInfo {
   terminalId: string;
 }
 
+export interface TaskCounts {
+  pending: number;
+  in_progress: number;
+  completed: number;
+}
+
 export interface ClaudeSession {
-  workspaceId: string;
   sessionId: string;
+  workspaceId: string | null;
+  workspaceName: string | null;
+  cwd: string | null;
   gitBranch: string | null;
+  model: string | null;
+  lastMessageType: string | null;
+  lastTimestamp: string | null;
+  taskCount: TaskCounts;
   active: boolean;
-  taskCount: number;
 }

@@ -1,3 +1,4 @@
+mod claude;
 mod git;
 mod ipc;
 mod pty;
@@ -29,6 +30,8 @@ pub fn run() {
             // Git
             ipc::commands::get_git_status,
             ipc::commands::start_git_watching,
+            // Claude Code
+            ipc::commands::start_claude_monitoring,
         ])
         .run(tauri::generate_context!())
         .expect("error while running grove");
