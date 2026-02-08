@@ -31,6 +31,22 @@ export function TerminalTab({ terminalId, isActive, onExit }: TerminalTabProps) 
         zIndex: isActive ? 1 : 0,
       }}
     >
+      {/* DEBUG indicator */}
+      <div
+        className="debug-indicator"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          background: "red",
+          color: "white",
+          padding: "8px",
+          zIndex: 9999,
+          fontSize: "12px",
+        }}
+      >
+        Waiting for data...
+      </div>
       <div ref={containerRef} className="h-full w-full" />
     </div>
   );

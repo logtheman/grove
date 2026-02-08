@@ -99,28 +99,57 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
     // Focus the terminal
     terminal.focus();
 
-    // Set up data listener
+    // Set up data listener IMMEDIATELY (before terminal renders) to avoid race condition
+    // where PTY data arrives before frontend is listening
     let unlistenData: (() => void) | undefined;
     let unlistenExit: (() => void) | undefined;
 
-    const setupListeners = async () => {
+    // Use IIFE to await listener setup while still allowing synchronous useEffect return
+    (async () => {
       console.log("[grove-term] setting up listeners for:", terminalId);
-      unlistenData = await onTerminalData(terminalId, (data) => {
-        const bytes = new Uint8Array(data);
-        console.log("[grove-term] writing", bytes.length, "bytes to xterm, terminalRef=", !!terminalRef.current);
-        if (terminalRef.current) {
-          terminalRef.current.write(bytes);
-        } else {
-          pendingDataRef.current.push(bytes);
-        }
-      });
+      console.error("[grove-term] SETTING UP LISTENERS FOR:", terminalId); // More visible
 
-      unlistenExit = await onTerminalExit(terminalId, () => {
-        onExitRef.current?.();
-      });
-    };
+      // @ts-ignore - Add to window for debugging
+      if (!window.groveDebug) window.groveDebug = { dataCount: 0, listenerSetup: false };
+      window.groveDebug.listenerSetup = true;
+      window.groveDebug.terminalId = terminalId;
 
-    setupListeners();
+      let dataCount = 0;
+      try {
+        unlistenData = await onTerminalData(terminalId, (data) => {
+          const bytes = new Uint8Array(data);
+          dataCount++;
+          window.groveDebug.dataCount = dataCount;
+          window.groveDebug.lastByteCount = bytes.length;
+
+          console.log("[grove-term] DATA RECEIVED!", dataCount, "chunks,", bytes.length, "bytes");
+          console.error("[grove-term] DATA RECEIVED!", dataCount, "chunks,", bytes.length, "bytes"); // More visible
+
+          // Update debug indicator if it exists
+          const indicator = document.querySelector('.debug-indicator');
+          if (indicator) {
+            indicator.textContent = `DATA RECEIVED: ${dataCount} chunks, ${bytes.length} bytes (last)`;
+            (indicator as HTMLElement).style.background = "green";
+          }
+
+          if (terminalRef.current) {
+            terminalRef.current.write(bytes);
+          } else {
+            pendingDataRef.current.push(bytes);
+          }
+        });
+
+        unlistenExit = await onTerminalExit(terminalId, () => {
+          onExitRef.current?.();
+        });
+
+        console.log("[grove-term] listeners successfully set up for:", terminalId);
+        console.error("[grove-term] LISTENERS READY!", terminalId);
+      } catch (error) {
+        console.error("[grove-term] Error setting up listeners:", error);
+        alert("Failed to set up terminal listeners: " + error);
+      }
+    })();
 
     // Window resize handler
     const handleResize = () => {

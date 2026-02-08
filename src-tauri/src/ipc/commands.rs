@@ -46,9 +46,12 @@ pub fn create_terminal(
         80,
         move |data| {
             let event_name = format!("{}:{}", events::TERMINAL_DATA, data_event_id);
+            eprintln!("[grove-cmd] emitting {} with {} bytes", event_name, data.len());
             let result = data_app_handle.emit(&event_name, &data);
             if let Err(e) = result {
                 eprintln!("[grove-cmd] emit data error: {}", e);
+            } else {
+                eprintln!("[grove-cmd] emit successful");
             }
         },
         move || {
