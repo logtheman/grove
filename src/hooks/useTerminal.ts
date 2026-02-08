@@ -161,6 +161,59 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
           const ctrlL = new Uint8Array([12]); // ASCII 12 = Ctrl+L
           writeToTerminal(terminalId, ctrlL);
         }, 100);
+
+        // Auto-capture debug state for Claude debugging (after terminal setup)
+        setTimeout(async () => {
+          try {
+            const { writeDebugLog } = await import("@/services/tauri");
+            const termContainer = document.querySelector('.xterm');
+            const screen = document.querySelector('.xterm-screen');
+            const viewport = document.querySelector('.xterm-viewport');
+            const rows = document.querySelector('.xterm-rows');
+            const canvas = document.querySelector('canvas');
+
+            const debugState = {
+              timestamp: new Date().toISOString(),
+              terminalId,
+              groveDebug: (window as any).groveDebug,
+              terminal: {
+                exists: !!termContainer,
+                visible: termContainer?.checkVisibility(),
+                dimensions: termContainer ? {
+                  width: (termContainer as HTMLElement).clientWidth,
+                  height: (termContainer as HTMLElement).clientHeight,
+                  scrollHeight: (termContainer as HTMLElement).scrollHeight,
+                } : null,
+                viewport: viewport ? {
+                  scrollTop: (viewport as HTMLElement).scrollTop,
+                  scrollHeight: (viewport as HTMLElement).scrollHeight,
+                  clientHeight: (viewport as HTMLElement).clientHeight,
+                } : null,
+                screen: screen ? {
+                  childCount: screen.childElementCount,
+                  innerHTML: screen.innerHTML.slice(0, 2000),
+                  textContent: screen.textContent?.slice(0, 1000),
+                } : null,
+                rows: rows ? {
+                  exists: true,
+                  childCount: rows.childElementCount,
+                  innerHTML: rows.innerHTML.slice(0, 500),
+                } : { exists: false },
+                canvas: canvas ? {
+                  exists: true,
+                  width: (canvas as HTMLCanvasElement).width,
+                  height: (canvas as HTMLCanvasElement).height,
+                } : { exists: false },
+                fullStructure: termContainer?.innerHTML.slice(0, 3000),
+              },
+            };
+
+            await writeDebugLog('/tmp/grove-debug.json', JSON.stringify(debugState, null, 2));
+            console.log("[grove-term] Debug state written to /tmp/grove-debug.json");
+          } catch (error) {
+            console.error("[grove-term] Failed to capture debug state:", error);
+          }
+        }, 2000);
       } catch (error) {
         console.error("[grove-term] Error setting up listeners:", error);
         alert("Failed to set up terminal listeners: " + error);

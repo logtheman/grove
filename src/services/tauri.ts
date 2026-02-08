@@ -38,6 +38,12 @@ export async function listTerminals(): Promise<string[]> {
   return invoke<string[]>("list_terminals");
 }
 
+// ── Debug ──
+
+export async function writeDebugLog(path: string, content: string): Promise<void> {
+  return invoke("write_debug_log", { path, content });
+}
+
 export function onTerminalData(
   terminalId: string,
   callback: (data: number[]) => void,

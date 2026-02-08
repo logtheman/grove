@@ -20,6 +20,15 @@ pub struct TerminalInfo {
 }
 
 #[tauri::command]
+pub fn write_debug_log(path: String, content: String) -> Result<(), String> {
+    use std::fs;
+    fs::write(&path, content)
+        .map_err(|e| format!("Failed to write debug log: {}", e))?;
+    eprintln!("[grove-cmd] Debug log written to: {}", path);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn create_terminal(
     app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,

@@ -22,6 +22,8 @@ pub fn run() {
             ipc::commands::write_to_terminal,
             ipc::commands::resize_terminal,
             ipc::commands::list_terminals,
+            // Debug
+            ipc::commands::write_debug_log,
             // Workspace
             ipc::commands::add_workspace,
             ipc::commands::discover_workspaces,
