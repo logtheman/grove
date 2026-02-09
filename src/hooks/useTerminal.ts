@@ -119,8 +119,10 @@ export function useTerminal({ terminalId, onExit }: UseTerminalOptions) {
         unlistenData = await onTerminalData(terminalId, (data) => {
           const bytes = new Uint8Array(data);
           dataCount++;
-          window.groveDebug.dataCount = dataCount;
-          window.groveDebug.lastByteCount = bytes.length;
+          if (window.groveDebug) {
+            window.groveDebug.dataCount = dataCount;
+            window.groveDebug.lastByteCount = bytes.length;
+          }
 
           console.log("[grove-term] DATA RECEIVED!", dataCount, "chunks,", bytes.length, "bytes", "data:", data);
           console.error("[grove-term] DATA RECEIVED!", dataCount, "chunks,", bytes.length, "bytes"); // More visible
