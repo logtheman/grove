@@ -32,6 +32,7 @@ pub fn run() {
             ipc::commands::scan_for_workspaces,
             // Git
             ipc::commands::get_git_status,
+            ipc::commands::get_remote_git_status,
             ipc::commands::start_git_watching,
             // Claude Code
             ipc::commands::start_claude_monitoring,

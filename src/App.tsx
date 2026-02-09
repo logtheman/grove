@@ -16,6 +16,7 @@ function App() {
     activeWorkspaceId,
     gitStatuses,
     setActiveWorkspace,
+    updateGitStatus,
     discoverWorkspaces,
     removeWorkspace,
     scanForWorkspaces,
@@ -136,7 +137,7 @@ function App() {
         onSelectWorkspace={handleSelectWorkspace}
         onDiscoverWorkspaces={handleDiscoverWorkspaces}
         onRemoveWorkspace={removeWorkspace}
-        onScanForWorkspaces={() => scanForWorkspaces(activeTab?.cwd)}
+        onScanForWorkspaces={() => scanForWorkspaces(activeTab?.cwd, activeTabId || undefined)}
       />
 
       {/* Center: Terminal area */}
@@ -204,8 +205,11 @@ function App() {
 
       {/* Right: Dashboard panel */}
       <DashboardPanel
+        workspace={activeWorkspace}
         gitStatus={activeGitStatus}
         claudeSessions={claudeSessions}
+        activeTerminalId={activeTabId}
+        onGitStatusUpdate={updateGitStatus}
       />
     </div>
   );

@@ -84,14 +84,18 @@ export async function listWorkspaces(): Promise<Workspace[]> {
   return invoke<Workspace[]>("list_workspaces");
 }
 
-export async function scanForWorkspaces(cwd?: string): Promise<Workspace[]> {
-  return invoke<Workspace[]>("scan_for_workspaces", { cwd });
+export async function scanForWorkspaces(cwd?: string, terminalId?: string): Promise<Workspace[]> {
+  return invoke<Workspace[]>("scan_for_workspaces", { cwd, terminalId });
 }
 
 // ── Git ──
 
 export async function getGitStatus(workspaceId: string): Promise<GitStatus> {
   return invoke<GitStatus>("get_git_status", { workspaceId });
+}
+
+export async function getRemoteGitStatus(workspaceId: string, terminalId: string): Promise<GitStatus> {
+  return invoke<GitStatus>("get_remote_git_status", { workspaceId, terminalId });
 }
 
 export async function startGitWatching(): Promise<void> {

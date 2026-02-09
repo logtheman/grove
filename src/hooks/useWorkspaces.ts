@@ -150,10 +150,10 @@ export function useWorkspaces() {
     [removeWorkspaceFromStore],
   );
 
-  const handleScanForWorkspaces = useCallback(async (cwd?: string) => {
-    console.log("[useWorkspaces] Starting workspace scan from:", cwd || "default directories");
+  const handleScanForWorkspaces = useCallback(async (cwd?: string, terminalId?: string) => {
+    console.log("[useWorkspaces] Starting workspace scan from:", cwd || "default directories", "terminal:", terminalId || "none");
     const { scanForWorkspaces } = await import("@/services/tauri");
-    const discovered = await scanForWorkspaces(cwd);
+    const discovered = await scanForWorkspaces(cwd, terminalId);
     addWorkspaces(discovered);
     console.log(`[useWorkspaces] Scan complete: found ${discovered.length} new workspace(s)`);
     if (discovered.length === 0) {
@@ -167,6 +167,7 @@ export function useWorkspaces() {
     activeWorkspaceId,
     gitStatuses,
     setActiveWorkspace,
+    updateGitStatus,
     addWorkspace: handleAddWorkspace,
     discoverWorkspaces: handleDiscoverWorkspaces,
     removeWorkspace: handleRemoveWorkspace,

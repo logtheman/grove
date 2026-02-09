@@ -159,21 +159,78 @@ pub async fn execute_in_terminal(
 ) -> Result<String, String> {
     eprintln!("[grove-cmd] execute_in_terminal: {} in {}", command, terminal_id);
 
+    // Generate a unique ID for this command execution
+    let cmd_id = uuid::Uuid::new_v4().to_string();
+
+    // Wrap command with markers for output capture
+    let wrapped_command = format!(
+        "echo 'GROVE_EXEC_START_{}' && {} && echo 'GROVE_EXEC_END_{}'\n",
+        cmd_id, command, cmd_id
+    );
+
     // Send command to terminal
     {
         let mut terminals = state.terminals.lock();
         if let Some(session) = terminals.get_mut(&terminal_id) {
-            let cmd_bytes = format!("{}\n", command).into_bytes();
-            session.write(&cmd_bytes)
+            session.write(wrapped_command.as_bytes())
                 .map_err(|e| format!("Failed to write command: {}", e))?;
         } else {
             return Err(format!("Terminal {} not found", terminal_id));
         }
     }
 
-    // For now, return empty - we'd need to capture output differently
-    // This is a simplified version that just executes the command
-    Ok(String::new())
+    // Wait for command to complete (poll with timeout)
+    let max_wait = std::time::Duration::from_secs(10);
+    let start = std::time::Instant::now();
+    let poll_interval = std::time::Duration::from_millis(100);
+
+    loop {
+        if start.elapsed() > max_wait {
+            // Clean up on timeout
+            let terminals = state.terminals.lock();
+            if let Some(session) = terminals.get(&terminal_id) {
+                let mut pending_commands = session.pending_commands.lock().unwrap();
+                pending_commands.remove(&cmd_id);
+                eprintln!("[grove-cmd] execute_in_terminal: timeout, cleaned up command {}", cmd_id);
+            }
+            return Err("Command execution timeout".to_string());
+        }
+
+        // Check if command is complete
+        let is_complete = {
+            let terminals = state.terminals.lock();
+            if let Some(session) = terminals.get(&terminal_id) {
+                let pending_commands = session.pending_commands.lock().unwrap();
+                if let Some(exec) = pending_commands.get(&cmd_id) {
+                    if exec.complete {
+                        Some(exec.output.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                return Err(format!("Terminal {} not found", terminal_id));
+            }
+        }; // Drop the lock here before await
+
+        if let Some(output) = is_complete {
+            eprintln!("[grove-cmd] execute_in_terminal: command complete, {} bytes", output.len());
+
+            // Clean up the completed command from pending_commands
+            let terminals = state.terminals.lock();
+            if let Some(session) = terminals.get(&terminal_id) {
+                let mut pending_commands = session.pending_commands.lock().unwrap();
+                pending_commands.remove(&cmd_id);
+                eprintln!("[grove-cmd] execute_in_terminal: cleaned up command {}", cmd_id);
+            }
+
+            return Ok(output);
+        }
+
+        tokio::time::sleep(poll_interval).await;
+    }
 }
 
 // ── Workspace commands ──
@@ -245,27 +302,47 @@ pub fn list_workspaces(state: tauri::State<'_, Arc<AppState>>) -> Vec<Workspace>
 }
 
 #[tauri::command]
-pub fn scan_for_workspaces(
+pub async fn scan_for_workspaces(
     app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     cwd: Option<String>,
+    terminal_id: Option<String>,
 ) -> Result<Vec<Workspace>, String> {
     use crate::workspace::discovery;
 
-    let cwd_path = cwd.unwrap_or_else(|| {
-        dirs::home_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| "/".to_string())
-    });
+    eprintln!("[grove-cmd] scan_for_workspaces: cwd={:?}, terminal_id={:?}", cwd, terminal_id);
 
-    eprintln!("[grove-cmd] scan_for_workspaces: running git worktree list in: {}", cwd_path);
+    // If terminal_id is provided, execute in terminal (for remote SSH sessions)
+    let discovered = if let Some(tid) = terminal_id {
+        eprintln!("[grove-cmd] scan_for_workspaces: executing in terminal {}", tid);
 
-    // Just run git worktree list in the cwd
-    let discovered = match discovery::discover_worktrees(&PathBuf::from(&cwd_path)) {
-        Ok(worktrees) => worktrees,
-        Err(e) => {
-            eprintln!("[grove-cmd] scan_for_workspaces: git worktree list failed: {}", e);
-            Vec::new()
+        // Execute git worktree list in the terminal
+        let output = execute_in_terminal(
+            state.clone(),
+            tid,
+            "git worktree list --porcelain".to_string()
+        ).await?;
+
+        eprintln!("[grove-cmd] scan_for_workspaces: got output {} bytes", output.len());
+
+        // Parse the porcelain output
+        parse_worktree_output(&output)
+    } else {
+        // Fall back to local execution
+        let cwd_path = cwd.unwrap_or_else(|| {
+            dirs::home_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "/".to_string())
+        });
+
+        eprintln!("[grove-cmd] scan_for_workspaces: running local git worktree list in: {}", cwd_path);
+
+        match discovery::discover_worktrees(&PathBuf::from(&cwd_path)) {
+            Ok(worktrees) => worktrees,
+            Err(e) => {
+                eprintln!("[grove-cmd] scan_for_workspaces: git worktree list failed: {}", e);
+                Vec::new()
+            }
         }
     };
 
@@ -294,6 +371,102 @@ pub fn scan_for_workspaces(
     Ok(added)
 }
 
+fn parse_worktree_output(output: &str) -> Vec<crate::workspace::discovery::WorktreeInfo> {
+    use std::path::PathBuf;
+
+    let mut worktrees = Vec::new();
+    let mut current_worktree: Option<crate::workspace::discovery::WorktreeInfo> = None;
+
+    // Strip ANSI escape codes using a regex-free approach
+    fn strip_ansi(s: &str) -> String {
+        let mut result = String::new();
+        let mut in_escape = false;
+        let bytes = s.as_bytes();
+        let mut i = 0;
+
+        while i < bytes.len() {
+            if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+                // Start of ANSI escape sequence
+                in_escape = true;
+                i += 2;
+            } else if in_escape {
+                // Skip until we find a letter (end of escape sequence)
+                if bytes[i].is_ascii_alphabetic() {
+                    in_escape = false;
+                }
+                i += 1;
+            } else {
+                result.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+        result
+    }
+
+    // Clean the output - remove ANSI escape codes and markers
+    let clean_output = output
+        .lines()
+        .map(|line| strip_ansi(line))
+        .filter(|line| {
+            !line.contains("GROVE_EXEC_START_") &&
+            !line.contains("GROVE_EXEC_END_") &&
+            !line.trim().is_empty()
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    for line in clean_output.lines() {
+        let line = line.trim();
+
+        if line.starts_with("worktree ") {
+            // Save previous worktree
+            if let Some(wt) = current_worktree.take() {
+                worktrees.push(wt);
+            }
+
+            // Start new worktree
+            let path = PathBuf::from(line.trim_start_matches("worktree "));
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "main".to_string());
+
+            current_worktree = Some(crate::workspace::discovery::WorktreeInfo {
+                name,
+                path,
+                branch: None,
+                is_main: worktrees.is_empty(),
+            });
+        } else if line.starts_with("branch ") {
+            if let Some(ref mut wt) = current_worktree {
+                let branch_ref = line.trim_start_matches("branch ");
+                let branch = branch_ref
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(branch_ref)
+                    .to_string();
+                wt.branch = Some(branch);
+            }
+        } else if line.starts_with("HEAD ") {
+            if let Some(ref mut wt) = current_worktree {
+                if wt.branch.is_none() {
+                    let sha = line.trim_start_matches("HEAD ");
+                    if sha.len() >= 7 {
+                        wt.branch = Some(sha[..7].to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Add last worktree
+    if let Some(wt) = current_worktree {
+        worktrees.push(wt);
+    }
+
+    eprintln!("[grove-cmd] parse_worktree_output: parsed {} worktrees", worktrees.len());
+    worktrees
+}
+
 #[tauri::command]
 pub fn get_git_status(
     state: tauri::State<'_, Arc<AppState>>,
@@ -306,6 +479,123 @@ pub fn get_git_status(
 
     git_status::query_status(&workspace_id, &PathBuf::from(&ws.path))
         .map_err(|e| format!("Git status failed: {}", e))
+}
+
+#[tauri::command]
+pub async fn get_remote_git_status(
+    state: tauri::State<'_, Arc<AppState>>,
+    workspace_id: String,
+    terminal_id: String,
+) -> Result<git_status::GitStatus, String> {
+    let workspace_path = {
+        let workspaces = state.workspaces.lock();
+        let ws = workspaces
+            .get_workspace(&workspace_id)
+            .ok_or_else(|| format!("Workspace {} not found", workspace_id))?;
+        ws.path.clone()
+    };
+
+    eprintln!("[grove-cmd] get_remote_git_status: workspace_id={}, path={}", workspace_id, workspace_path);
+
+    // Execute git commands in the terminal to get status
+    let commands = format!(
+        "cd {} && git rev-parse --abbrev-ref HEAD 2>/dev/null; \
+         git rev-parse --abbrev-ref @{{u}} 2>/dev/null; \
+         git rev-list --left-right --count HEAD...@{{u}} 2>/dev/null; \
+         git status --porcelain 2>/dev/null",
+        workspace_path
+    );
+
+    let output = execute_in_terminal(state.clone(), terminal_id, commands).await?;
+
+    eprintln!("[grove-cmd] get_remote_git_status: got output {} bytes", output.len());
+
+    // Parse the output
+    parse_git_status_output(&workspace_id, &output)
+}
+
+fn parse_git_status_output(workspace_id: &str, output: &str) -> Result<git_status::GitStatus, String> {
+    // Filter out command lines and empty lines
+    let lines: Vec<&str> = output.lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty() &&
+            !trimmed.contains("git rev-parse") &&
+            !trimmed.contains("git status") &&
+            !trimmed.contains("git rev-list") &&
+            !trimmed.contains("2>/dev/null") &&
+            !trimmed.contains("&& cd") &&
+            !trimmed.starts_with("cd ")
+        })
+        .collect();
+
+    eprintln!("[grove-cmd] parse_git_status_output: {} lines after filtering", lines.len());
+
+    // Debug: print first few lines
+    for (i, line) in lines.iter().take(5).enumerate() {
+        eprintln!("[grove-cmd] Line {}: {}", i, line);
+    }
+
+    let branch = lines.get(0).map(|s| s.trim().to_string());
+    let remote_branch = lines.get(1).map(|s| s.trim().to_string());
+
+    // Parse ahead/behind counts
+    let (ahead, behind) = if let Some(counts_line) = lines.get(2) {
+        let parts: Vec<&str> = counts_line.split_whitespace().collect();
+        let ahead = parts.get(0).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+        let behind = parts.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+        (ahead, behind)
+    } else {
+        (0, 0)
+    };
+
+    // Parse git status --porcelain output (starts from line 3)
+    let mut untracked_count = 0;
+    let mut staged_count = 0;
+    let mut modified_count = 0;
+
+    for line in lines.iter().skip(3) {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        // Porcelain format: XY filename
+        // X = index status, Y = working tree status
+        if line.starts_with("??") {
+            untracked_count += 1;
+        } else if let Some(first_char) = line.chars().next() {
+            if first_char != ' ' && first_char != '?' {
+                staged_count += 1;
+            }
+            if line.len() >= 2 {
+                if let Some(second_char) = line.chars().nth(1) {
+                    if second_char != ' ' && second_char != '?' {
+                        modified_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    let dirty = untracked_count > 0 || staged_count > 0 || modified_count > 0;
+
+    eprintln!(
+        "[grove-cmd] parse_git_status_output: branch={:?}, dirty={}, staged={}, modified={}, untracked={}",
+        branch, dirty, staged_count, modified_count, untracked_count
+    );
+
+    Ok(git_status::GitStatus {
+        workspace_id: workspace_id.to_string(),
+        branch,
+        remote_branch,
+        ahead,
+        behind,
+        dirty,
+        untracked_count,
+        staged_count,
+        modified_count,
+    })
 }
 
 #[tauri::command]

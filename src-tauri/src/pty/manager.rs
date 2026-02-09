@@ -3,14 +3,20 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-
 use std::sync::Mutex;
+use std::collections::HashMap;
+
+pub struct CommandExecution {
+    pub output: String,
+    pub complete: bool,
+}
 
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     shutdown: Arc<AtomicBool>,
     pub current_cwd: Arc<Mutex<String>>,
+    pub pending_commands: Arc<Mutex<HashMap<String, CommandExecution>>>,
 }
 
 impl PtySession {
@@ -63,6 +69,8 @@ impl PtySession {
         let shutdown_reader = shutdown.clone();
         let current_cwd = Arc::new(Mutex::new(cwd.to_string()));
         let cwd_for_reader = current_cwd.clone();
+        let pending_commands = Arc::new(Mutex::new(HashMap::new()));
+        let pending_commands_reader = pending_commands.clone();
 
         // Spawn reader thread - reads PTY output and sends to frontend
         std::thread::spawn(move || {
@@ -82,6 +90,7 @@ impl PtySession {
                     Ok(n) => {
                         eprintln!("[grove-pty] reader thread: read {} bytes", n);
                         let data = buf[..n].to_vec();
+                        let mut should_display = true;
 
                         // Parse OSC 7 for CWD tracking: \e]7;file://host/path\e\\
                         if let Ok(s) = String::from_utf8(data.clone()) {
@@ -97,9 +106,97 @@ impl PtySession {
                                     }
                                 }
                             }
+
+                            // Check for command execution markers
+                            if let Ok(mut cmds) = pending_commands_reader.lock() {
+                                // Hide command lines that contain our wrapped command pattern
+                                // e.g., "echo 'GROVE_EXEC_START_uuid' && git worktree list..."
+                                if s.contains("echo 'GROVE_EXEC_START_") ||
+                                   s.contains("echo \"GROVE_EXEC_START_") ||
+                                   (s.contains("GROVE_EXEC_END_") && s.contains(" && echo")) {
+                                    should_display = false;
+                                    eprintln!("[grove-pty] Hiding command wrapper from display");
+                                }
+
+                                // Hide git command lines (but only the command itself, not all output)
+                                if s.trim().starts_with("git ") && s.contains("2>/dev/null") {
+                                    should_display = false;
+                                    eprintln!("[grove-pty] Hiding git command line from display");
+                                }
+
+                                // Check for start markers
+                                if s.contains("GROVE_EXEC_START_") {
+                                    should_display = false;  // Hide marker line
+                                    for line in s.lines() {
+                                        if let Some(uuid_start) = line.find("GROVE_EXEC_START_") {
+                                            // Extract UUID - take only valid UUID chars (alphanumeric and hyphens)
+                                            let rest = &line[uuid_start + 17..];
+                                            let uuid: String = rest.chars()
+                                                .take_while(|c| c.is_alphanumeric() || *c == '-')
+                                                .collect();
+                                            if uuid.len() == 36 {  // Valid UUID length
+                                                eprintln!("[grove-pty] Command execution started: {}", uuid);
+                                                cmds.insert(uuid.clone(), CommandExecution {
+                                                    output: String::new(),
+                                                    complete: false,
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Accumulate output for active commands and check for end markers
+                                let active_commands: Vec<String> = cmds.keys()
+                                    .filter(|k| !cmds[*k].complete)
+                                    .cloned()
+                                    .collect();
+
+                                for cmd_id in active_commands {
+                                    if let Some(cmd) = cmds.get_mut(&cmd_id) {
+                                        // Check if this chunk contains the end marker
+                                        let end_marker = format!("GROVE_EXEC_END_{}", cmd_id);
+                                        let start_marker = format!("GROVE_EXEC_START_{}", cmd_id);
+
+                                        if s.contains(&end_marker) {
+                                            // Extract everything before the end marker, but after start marker
+                                            let output_chunk = if let Some(end_pos) = s.find(&end_marker) {
+                                                let before_end = &s[..end_pos];
+                                                // Also filter out the start marker if it's in this chunk
+                                                if let Some(start_pos) = before_end.find(&start_marker) {
+                                                    &before_end[start_pos + start_marker.len()..]
+                                                } else {
+                                                    before_end
+                                                }
+                                            } else {
+                                                ""
+                                            };
+
+                                            cmd.output.push_str(output_chunk);
+                                            cmd.complete = true;
+                                            eprintln!("[grove-pty] Command execution complete: {} ({} bytes)", cmd_id, cmd.output.len());
+                                        } else if !s.contains(&start_marker) {
+                                            // Only accumulate output that doesn't contain start marker
+                                            cmd.output.push_str(&s);
+                                        }
+                                    }
+                                }
+
+                                // Clean up completed commands after a delay to avoid accumulation
+                                // Commands are kept briefly so execute_in_terminal can read them
+                                let completed_commands: Vec<String> = cmds.keys()
+                                    .filter(|k| cmds[*k].complete && cmds[*k].output.len() > 0)
+                                    .cloned()
+                                    .collect();
+
+                                // For now, don't remove them immediately - execute_in_terminal needs to read them
+                                // They'll be cleaned up by execute_in_terminal after reading
+                            }
                         }
 
-                        on_data(data);
+                        // Only send data to terminal if it should be displayed
+                        if should_display {
+                            on_data(data);
+                        }
                     }
                     Err(e) => {
                         eprintln!("[grove-pty] reader thread: error: {} (kind={:?})", e, e.kind());
@@ -131,6 +228,7 @@ impl PtySession {
             writer,
             shutdown,
             current_cwd,
+            pending_commands,
         })
     }
 
