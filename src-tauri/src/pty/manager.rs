@@ -4,10 +4,13 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use std::sync::Mutex;
+
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     shutdown: Arc<AtomicBool>,
+    pub current_cwd: Arc<Mutex<String>>,
 }
 
 impl PtySession {
@@ -46,6 +49,8 @@ impl PtySession {
         cmd.arg("-l");
         cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
+        // Enable OSC 7 for CWD tracking
+        cmd.env("PROMPT_COMMAND", "printf '\\e]7;file://%s%s\\e\\\\' \"$HOSTNAME\" \"$PWD\"");
 
         let mut child = pair.slave.spawn_command(cmd)?;
         eprintln!("[grove-pty] spawn_command succeeded");
@@ -56,6 +61,8 @@ impl PtySession {
 
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_reader = shutdown.clone();
+        let current_cwd = Arc::new(Mutex::new(cwd.to_string()));
+        let cwd_for_reader = current_cwd.clone();
 
         // Spawn reader thread - reads PTY output and sends to frontend
         std::thread::spawn(move || {
@@ -74,7 +81,25 @@ impl PtySession {
                     }
                     Ok(n) => {
                         eprintln!("[grove-pty] reader thread: read {} bytes", n);
-                        on_data(buf[..n].to_vec());
+                        let data = buf[..n].to_vec();
+
+                        // Parse OSC 7 for CWD tracking: \e]7;file://host/path\e\\
+                        if let Ok(s) = String::from_utf8(data.clone()) {
+                            if let Some(start) = s.find("\x1b]7;file://") {
+                                if let Some(end) = s[start..].find("\x1b\\") {
+                                    let osc = &s[start + 12..start + end];
+                                    if let Some(slash_pos) = osc.find('/') {
+                                        let path = &osc[slash_pos..];
+                                        if let Ok(mut cwd) = cwd_for_reader.lock() {
+                                            *cwd = path.to_string();
+                                            eprintln!("[grove-pty] CWD updated: {}", path);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        on_data(data);
                     }
                     Err(e) => {
                         eprintln!("[grove-pty] reader thread: error: {} (kind={:?})", e, e.kind());
@@ -105,6 +130,7 @@ impl PtySession {
             master: pair.master,
             writer,
             shutdown,
+            current_cwd,
         })
     }
 
@@ -126,6 +152,10 @@ impl PtySession {
 
     pub fn shutdown(&self) {
         self.shutdown.store(true, Ordering::Relaxed);
+    }
+
+    pub fn get_cwd(&self) -> String {
+        self.current_cwd.lock().unwrap().clone()
     }
 }
 

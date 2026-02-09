@@ -51,7 +51,13 @@ export function WorkspaceSidebar({
         <div className="flex items-center gap-1">
           <button
             className="p-1 hover:bg-grove-surface rounded text-grove-text-muted hover:text-grove-text"
-            onClick={onScanForWorkspaces}
+            onClick={async () => {
+              try {
+                await onScanForWorkspaces();
+              } catch (error) {
+                console.error("[WorkspaceSidebar] Scan failed:", error);
+              }
+            }}
             title="Scan for workspaces in ~/projects, ~/dev, etc."
           >
             <Search size={12} />

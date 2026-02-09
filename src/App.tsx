@@ -124,6 +124,8 @@ function App() {
   // Counts for status bar
   const dirtyCount = Object.values(gitStatuses).filter((s) => s.dirty).length;
 
+  const activeTab = tabs.find((t) => t.id === activeTabId);
+
   return (
     <div className="flex h-screen bg-grove-bg">
       {/* Left: Workspace sidebar */}
@@ -134,7 +136,7 @@ function App() {
         onSelectWorkspace={handleSelectWorkspace}
         onDiscoverWorkspaces={handleDiscoverWorkspaces}
         onRemoveWorkspace={removeWorkspace}
-        onScanForWorkspaces={scanForWorkspaces}
+        onScanForWorkspaces={() => scanForWorkspaces(activeTab?.cwd)}
       />
 
       {/* Center: Terminal area */}

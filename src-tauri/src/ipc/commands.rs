@@ -138,6 +138,44 @@ pub fn list_terminals(state: tauri::State<'_, Arc<AppState>>) -> Vec<String> {
     state.terminals.lock().keys().cloned().collect()
 }
 
+#[tauri::command]
+pub fn get_terminal_cwd(
+    state: tauri::State<'_, Arc<AppState>>,
+    terminal_id: String,
+) -> Result<String, String> {
+    let terminals = state.terminals.lock();
+    if let Some(session) = terminals.get(&terminal_id) {
+        Ok(session.get_cwd())
+    } else {
+        Err(format!("Terminal {} not found", terminal_id))
+    }
+}
+
+#[tauri::command]
+pub async fn execute_in_terminal(
+    state: tauri::State<'_, Arc<AppState>>,
+    terminal_id: String,
+    command: String,
+) -> Result<String, String> {
+    eprintln!("[grove-cmd] execute_in_terminal: {} in {}", command, terminal_id);
+
+    // Send command to terminal
+    {
+        let mut terminals = state.terminals.lock();
+        if let Some(session) = terminals.get_mut(&terminal_id) {
+            let cmd_bytes = format!("{}\n", command).into_bytes();
+            session.write(&cmd_bytes)
+                .map_err(|e| format!("Failed to write command: {}", e))?;
+        } else {
+            return Err(format!("Terminal {} not found", terminal_id));
+        }
+    }
+
+    // For now, return empty - we'd need to capture output differently
+    // This is a simplified version that just executes the command
+    Ok(String::new())
+}
+
 // ── Workspace commands ──
 
 #[tauri::command]
@@ -210,22 +248,48 @@ pub fn list_workspaces(state: tauri::State<'_, Arc<AppState>>) -> Vec<Workspace>
 pub fn scan_for_workspaces(
     app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
+    cwd: Option<String>,
 ) -> Result<Vec<Workspace>, String> {
     use crate::workspace::discovery;
 
-    let discovered = discovery::discover_common_repos();
+    let cwd_path = cwd.unwrap_or_else(|| {
+        dirs::home_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "/".to_string())
+    });
+
+    eprintln!("[grove-cmd] scan_for_workspaces: running git worktree list in: {}", cwd_path);
+
+    // Just run git worktree list in the cwd
+    let discovered = match discovery::discover_worktrees(&PathBuf::from(&cwd_path)) {
+        Ok(worktrees) => worktrees,
+        Err(e) => {
+            eprintln!("[grove-cmd] scan_for_workspaces: git worktree list failed: {}", e);
+            Vec::new()
+        }
+    };
+
+    eprintln!("[grove-cmd] scan_for_workspaces: discovery found {} total worktrees", discovered.len());
 
     let mut workspaces = state.workspaces.lock();
+    let existing_count = workspaces.list_workspaces().len();
+    eprintln!("[grove-cmd] scan_for_workspaces: {} existing workspaces", existing_count);
+
     let added = workspaces.add_multiple_from_discovery(discovered);
+    eprintln!("[grove-cmd] scan_for_workspaces: added {} new workspaces", added.len());
+
+    if added.is_empty() {
+        eprintln!("[grove-cmd] scan_for_workspaces: all discovered workspaces already tracked");
+    }
 
     // Persist
     let _ = ws_state::save_workspaces(&workspaces.list_workspaces());
 
     // Restart watchers with new paths
-    restart_git_watcher(&app, &state, &workspaces);
-    restart_claude_monitor(&app, &state, &workspaces);
-
-    eprintln!("[grove-cmd] scan_for_workspaces: discovered {} workspaces", added.len());
+    if !added.is_empty() {
+        restart_git_watcher(&app, &state, &workspaces);
+        restart_claude_monitor(&app, &state, &workspaces);
+    }
 
     Ok(added)
 }
